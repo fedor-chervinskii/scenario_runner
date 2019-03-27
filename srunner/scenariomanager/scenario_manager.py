@@ -126,6 +126,7 @@ class ScenarioManager(object):
         self.scenario_duration_game = 0.0
         self.start_system_time = None
         self.end_system_time = None
+        self.start_game_time = None
 
         world.on_tick(self._tick_scenario)
 
@@ -157,29 +158,38 @@ class ScenarioManager(object):
         self.end_system_time = None
         GameTime.restart()
 
-    def run_scenario(self, agent=None):
+    def start_scenario(self, agent=None):
         """
         Trigger the start of the scenario and wait for it to finish/fail
         """
         self.agent = agent
         print("ScenarioManager: Running scenario {}".format(self.scenario_tree.name))
         self.start_system_time = time.time()
-        start_game_time = GameTime.get_time()
+        self.start_game_time = GameTime.get_time()
 
         self._running = True
 
-        while self._running:
-            time.sleep(0.5)
-
+    def end_scenario(self):
         self.end_system_time = time.time()
         end_game_time = GameTime.get_time()
 
         self.scenario_duration_system = self.end_system_time - \
             self.start_system_time
-        self.scenario_duration_game = end_game_time - start_game_time
+        self.scenario_duration_game = end_game_time - self.start_game_time
 
         if self.scenario_tree.status == py_trees.common.Status.FAILURE:
             print("ScenarioManager: Terminated due to failure")
+
+    def run_scenario(self, agent=None):
+        """
+        Trigger the start of the scenario and wait for it to finish/fail
+        """
+        self.start_scenario(agent)
+
+        while self._running:
+            time.sleep(0.5)
+
+        self.end_scenario()
 
     def _tick_scenario(self, timestamp):
         """
@@ -253,7 +263,6 @@ class ScenarioManager(object):
                     result = "FAILURE"
                 elif criterion.test_status == "ACCEPTABLE":
                     result = "ACCEPTABLE"
-
 
         if self.scenario.timeout_node.timeout and not failure:
             timeout = True
@@ -371,6 +380,5 @@ class ScenarioManager(object):
                     return_message += "\n========== {}".format(item)
 
             return_message += "\n=================================="
-
 
         return result, final_score, return_message
