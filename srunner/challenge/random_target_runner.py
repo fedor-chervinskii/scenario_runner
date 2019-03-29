@@ -51,13 +51,13 @@ class RandomTargetRunner(object):
 
     # Tunable parameters
     client_timeout = 15.0  # in seconds
-    wait_for_world = 10.0  # in seconds
 
     # CARLA world and scenario handlers
     world = None
     manager = None
 
-    def __init__(self, args):
+    def __init__(self, host, port, num_vehicles=20, debug=False):
+        self.num_vehicles = 20
         self.output_scenario = []
         self._sensors_list = []
         self._hop_resolution = 2.0
@@ -65,7 +65,10 @@ class RandomTargetRunner(object):
         self.spawn_point = None
         self.action_buffer = None
         self.sensor_interface = SensorInterface()
-        self.start(args)
+        self.client = carla.Client(host, int(port))
+        self.client.set_timeout(self.client_timeout)
+        self.debug = debug
+        self.start()
 
     def get_action(self):
         return self.action_buffer
@@ -113,6 +116,7 @@ class RandomTargetRunner(object):
         random.shuffle(spawn_points)
         vehicle = None
 
+        spawn_point = None
         for spawn_point in spawn_points:
             vehicle = self.world.try_spawn_actor(blueprint, spawn_point)
             if vehicle:
@@ -141,6 +145,7 @@ class RandomTargetRunner(object):
         incl. spawn point and vehicle model.
         """
 
+        vehicle = None
         blueprint_library = self.world.get_blueprint_library()
 
         # Get vehicle by model
@@ -187,6 +192,7 @@ class RandomTargetRunner(object):
                 sensor = HDMapReader(vehicle, sensor_spec['reading_frequency'])
             # These are the sensors spawned on the carla world
             else:
+                sensor_location, sensor_rotation = None, None
                 bp = bp_library.find(sensor_spec['type'])
                 if sensor_spec['type'].startswith('sensor.camera'):
                     bp.set_attribute('image_size_x', str(sensor_spec['width']))
@@ -208,6 +214,8 @@ class RandomTargetRunner(object):
                     sensor_location = carla.Location(x=sensor_spec['x'], y=sensor_spec['y'],
                                                      z=sensor_spec['z'])
                     sensor_rotation = carla.Rotation()
+                else:
+                    raise NotImplementedError
 
                 # create sensor
                 sensor_transform = carla.Transform(sensor_location, sensor_rotation)
@@ -273,65 +281,61 @@ class RandomTargetRunner(object):
         return_message = avg_message + return_message
         print(return_message)
 
-    def start(self, args):
+    def start(self):
         """
         Run random target simulator
         """
 
-        # Setup and run the scenarios for repetition times
-        for _ in range(int(args.repetitions)):
-            config = ScenarioConfiguration()
-            config.town = "Town01"
+        config = ScenarioConfiguration()
+        config.town = "Town01"
 
-            client = carla.Client(args.host, int(args.port))
-            client.set_timeout(self.client_timeout)
+        self.world = self.client.load_world(config.town)
+        settings = carla.WorldSettings(
+            no_rendering_mode=False,
+            synchronous_mode=True)
+        self.world.apply_settings(settings)
+#        # Wait for the world to be ready
+#        self.world.wait_for_tick(self.wait_for_world)
 
-            # Once we have a client we can retrieve the world that is currently
-            # running.
-            self.world = client.load_world(config.town)
+        # Create scenario manager
+        self.manager = ScenarioManager(self.world, self.debug)
 
-            # Wait for the world to be ready
-            self.world.wait_for_tick(self.wait_for_world)
+        config.name = "RandomSpawnRandomTarget"
+        config.type = "ChallengeBasic"
+        for i in range(self.num_vehicles):
+            config.other_actors.append(DEFAULT_ACTOR)
 
-            # Create scenario manager
-            self.manager = ScenarioManager(self.world, args.debug)
+        try:
+            self.prepare_actors(config)
+            with self.spawn_point.location as location:
+                pos_x, pos_y, pos_z = location.x, location.y, location.z
+            config.ego_vehicle = ActorConfiguration(pos_x, pos_y, pos_z,
+                                                    self.spawn_point.rotation.yaw,
+                                                    False, False,
+                                                    carla.Transform(carla.Location(x=pos_x, y=pos_y, z=pos_z)),
+                                                    "vehicle.*")
+            fin_x, fin_y, fin_z = self.target.location.x, self.target.location.y, self.target.location.z
+            config.target = TargetConfiguration(fin_x, fin_y, fin_z,
+                                                carla.Transform(carla.Location(x=fin_x, y=fin_y, z=fin_z)))
+            scenario = ChallengeBasic(self.world,
+                                      self.ego_vehicle,
+                                      self.actors,
+                                      config.town,
+                                      randomize=False,
+                                      debug_mode=self.debug,
+                                      config=config)
+        except Exception as exception:
+            print("The scenario cannot be loaded")
+            print(exception)
+            self.cleanup(ego=True)
 
-            config.name = "RandomSpawnRandomTarget"
-            config.type = "ChallengeBasic"
-            for i in range(20):
-                config.other_actors.append(DEFAULT_ACTOR)
-
-            try:
-                self.prepare_actors(config)
-                pos_x, pos_y, pos_z = self.spawn_point.location.x, self.spawn_point.location.y, self.spawn_point.location.z
-                config.ego_vehicle = ActorConfiguration(pos_x, pos_y, pos_z,
-                                                        self.spawn_point.rotation.yaw,
-                                                        False, False,
-                                                        carla.Transform(carla.Location(x=pos_x, y=pos_y, z=pos_z)),
-                                                        "vehicle.*")
-                fin_x, fin_y, fin_z = self.target.location.x, self.target.location.y, self.target.location.z
-                config.target = TargetConfiguration(fin_x, fin_y, fin_z,
-                                                    carla.Transform(carla.Location(x=fin_x, y=fin_y, z=fin_z)))
-                scenario = ChallengeBasic(self.world,
-                                          self.ego_vehicle,
-                                          self.actors,
-                                          config.town,
-                                          args.randomize,
-                                          args.debug,
-                                          config)
-            except Exception as exception:
-                print("The scenario cannot be loaded")
-                print(exception)
-                self.cleanup(ego=True)
-                continue
-
-            # Load scenario and run it
-            self.manager.load_scenario(scenario)
-            self.manager.start_scenario(self.get_action)
-            self.success_criterion = InRadiusRegionTest(self.ego_vehicle,
-                                                        x=self.target.transform.location.x,
-                                                        y=self.target.transform.location.y,
-                                                        radius=10.)
+        # Load scenario and run it
+        self.manager.load_scenario(scenario)
+        self.manager.start_scenario(self.get_action)
+        self.success_criterion = InRadiusRegionTest(self.ego_vehicle,
+                                                    x=self.target.transform.location.x,
+                                                    y=self.target.transform.location.y,
+                                                    radius=10.)
 
     def step(self, action):
         observation, reward, done, info = None, None, False, None
@@ -343,6 +347,9 @@ class RandomTargetRunner(object):
             control.hand_brake = False
             control.manual_gear_shift = False
             self.manager.ego_vehicle.apply_control(control)
+
+            self.world.tick()
+
 #           input_data = self.sensor_interface.get_data()
             location = CarlaDataProvider.get_location(self.ego_vehicle)
             info = "location: {}".format(location)
@@ -367,4 +374,6 @@ class RandomTargetRunner(object):
         self.cleanup(ego=True)
 
         self.final_summary()
+
+        self.start()
 
