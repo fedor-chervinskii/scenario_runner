@@ -372,10 +372,6 @@ class RandomTargetRunner(object):
 
         # Stop scenario and cleanup
         self.manager.stop_scenario()
-
-        settings = self.world.get_settings()
-        settings.synchronous_mode = False
-        self.world.apply_settings(settings)
         self.cleanup(ego=True)
 #        self.final_summary()
         self.start()
