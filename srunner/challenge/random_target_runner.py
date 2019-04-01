@@ -13,6 +13,7 @@ Provisional code to evaluate Autonomous Agents for the CARLA Autonomous Driving 
 
 from __future__ import print_function
 from collections import namedtuple
+from py_trees.common import Status
 import random
 import time
 
@@ -58,10 +59,10 @@ class RandomTargetRunner(object):
         self._hop_resolution = 2.0
         self.target = None
         self.spawn_point = None
-        self.sensor_interface = SensorInterface()
-        self.host = host
-        self.port = port
+        self.sensor_interface = None
         self.debug = debug
+        self.client = carla.Client(host, int(port))
+        self.client.set_timeout(self.client_timeout)
         self.start()
 
     def __del__(self):
@@ -85,6 +86,7 @@ class RandomTargetRunner(object):
             if self.actors[i] is not None:
                 self.actors[i].destroy()
                 self.actors[i] = None
+            print(self.actors)
         self.actors = []
 
         for i, _ in enumerate(self._sensors_list):
@@ -93,6 +95,9 @@ class RandomTargetRunner(object):
                 self._sensors_list[i] = None
         self._sensors_list = []
 
+        if self.manager is not None:
+            del self.manager      
+        
         if ego and self.ego_vehicle is not None:
             self.ego_vehicle.destroy()
             self.ego_vehicle = None
@@ -172,6 +177,7 @@ class RandomTargetRunner(object):
         :param vehicle: ego vehicle
         :return:
         """
+        self.sensor_interface = SensorInterface()
         bp_library = self.world.get_blueprint_library()
         for sensor_spec in sensors:
             # These are the pseudosensors (not spawned)
@@ -220,10 +226,9 @@ class RandomTargetRunner(object):
         while not self.sensor_interface.all_sensors_ready():
             time.sleep(0.1)
 
-    def prepare_actors(self, config):
+    def prepare_actors(self):
         """
-        Spawn or update all scenario actors according to
-        their parameters provided in config
+        Spawn or update all scenario actors
         """
 
         # If ego_vehicle already exists, just update location
@@ -243,11 +248,13 @@ class RandomTargetRunner(object):
         self.setup_sensors(sensors, self.ego_vehicle)
 
         # spawn all other actors
-        for actor in config.other_actors:
-            new_actor = self.setup_vehicle(actor.model, actor.transform, hero=False, autopilot=True,
+        self.actors = []
+        for i in range(self.num_vehicles):
+            new_actor = self.setup_vehicle(DEFAULT_ACTOR.model, DEFAULT_ACTOR.transform, hero=False, autopilot=True,
                                            random_location=True)
-            self.actors.append(new_actor)
-
+            if new_actor is not None:
+                self.actors.append(new_actor)
+            
     def analyze_scenario(self):
         """
         Provide feedback about success/failure of a scenario
@@ -276,13 +283,13 @@ class RandomTargetRunner(object):
         """
         Run random target simulator
         """
-        client = carla.Client(self.host, int(self.port))
-        client.set_timeout(self.client_timeout)
-        
+
         config = ScenarioConfiguration()
         config.town = "Town01"
-
-        self.world = client.load_world(config.town)
+        self.world = self.client.get_world()
+        settings = self.world.get_settings()
+        settings.synchronous_mode = False        
+        self.world = self.client.load_world(config.town)
 #        # Wait for the world to be ready
         self.world.wait_for_tick(self.wait_for_world)
         print("world ready!")
@@ -292,11 +299,11 @@ class RandomTargetRunner(object):
 
         config.name = "RandomSpawnRandomTarget"
         config.type = "ChallengeBasic"
-        for i in range(self.num_vehicles):
-            config.other_actors.append(DEFAULT_ACTOR)
 
         if True:
-            self.prepare_actors(config)
+            self.prepare_actors()
+            for actor in self.actors:
+                config.other_actors.append(DEFAULT_ACTOR)
             pos_x, pos_y, pos_z = self.spawn_point.location.x, self.spawn_point.location.y, self.spawn_point.location.z
             config.ego_vehicle = ActorConfiguration(pos_x, pos_y, pos_z,
                                                     self.spawn_point.rotation.yaw,
@@ -318,14 +325,13 @@ class RandomTargetRunner(object):
 #            print(exception)
 #            self.cleanup(ego=True)
 
-        # Load scenario and run it
-        self.manager.load_scenario(scenario)
-        self.manager.start_scenario()
+            # Load scenario and run it
+            self.manager.load_scenario(scenario)
+            self.manager.start_scenario()
         
         # Switiching into synchronous mode
-        settings = carla.WorldSettings(
-            no_rendering_mode=False,
-            synchronous_mode=True)
+        settings = self.world.get_settings()
+        settings.synchronous_mode = False
         self.world.apply_settings(settings)
 
     def step(self, action):
@@ -340,7 +346,8 @@ class RandomTargetRunner(object):
             self.manager.ego_vehicle.apply_control(control)
 
             self.world.tick()
-
+            self.world.wait_for_tick()
+            
 #           input_data = self.sensor_interface.get_data()
             location = CarlaDataProvider.get_location(self.ego_vehicle)
             info = "location: {}".format(location)
@@ -349,10 +356,11 @@ class RandomTargetRunner(object):
             else:
                 observation = None
             status = self.manager.scenario.test_criteria.status
-            if status == "SUCCESS":
+            print(status)
+            if status == Status.SUCCESS:
                 reward = 1.
                 done = True
-            elif status == "FAILURE":
+            elif status == Status.FAILURE:
                 done = True
         else:
             done = True
@@ -365,11 +373,10 @@ class RandomTargetRunner(object):
         # Stop scenario and cleanup
         self.manager.stop_scenario()
 
+        settings = self.world.get_settings()
+        settings.synchronous_mode = False
+        self.world.apply_settings(settings)
         self.cleanup(ego=True)
-        print(self.ego_vehicle)
-        print(self.manager.ego_vehicle)
-        
-        self.final_summary()
-
+#        self.final_summary()
         self.start()
 

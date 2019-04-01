@@ -203,6 +203,8 @@ class ScenarioManager(object):
           multiple times in parallel.
         """
         with self._my_lock:
+            print("entering the lock: {}".format(time.time()))
+            sys.stdout.flush()
             if self._running and self._timestamp_last_run < timestamp.elapsed_seconds:
                 self._timestamp_last_run = timestamp.elapsed_seconds
 
@@ -229,6 +231,8 @@ class ScenarioManager(object):
 
                 if self.scenario_tree.status != py_trees.common.Status.RUNNING:
                     self._running = False
+            print("exiting the lock: {}".format(time.time()))
+            sys.stdout.flush()
 
     def stop_scenario(self):
         """
