@@ -335,6 +335,20 @@ class RandomTargetRunner(object):
         settings.synchronous_mode = False
         self.world.apply_settings(settings)
 
+    def get_observation(self):
+#       input_data = self.sensor_interface.get_data()
+        location = CarlaDataProvider.get_location(self.ego_vehicle)
+        velocity = CarlaDataProvider.get_velocity(self.ego_vehicle)
+        yaw = self.manager.ego_vehicle.get_transform().rotation.yaw
+        if location is not None:
+            observation = {"location": location,
+                           "goal": self.target.location,
+                            "yaw": yaw,
+                            "speed": velocity}
+        else:
+            observation = None 
+        return observation
+
     def step(self, action):
         observation, reward, done, info = None, -0.01, False, None
         if self.manager._running:
@@ -349,17 +363,7 @@ class RandomTargetRunner(object):
             self.world.tick()
             self.world.wait_for_tick()
             
-#           input_data = self.sensor_interface.get_data()
-            location = CarlaDataProvider.get_location(self.ego_vehicle)
-            velocity = CarlaDataProvider.get_velocity(self.ego_vehicle)
-            yaw = self.manager.ego_vehicle.get_transform().rotation.yaw
-            if location is not None:
-                observation = {"location": location,
-                               "goal": self.target.location,
-                               "yaw": yaw,
-                               "speed": velocity}
-            else:
-                observation = None
+            observation = self.get_observation()
             status = self.manager.scenario.test_criteria.status
             print(status)
             if status == Status.SUCCESS:
@@ -380,4 +384,4 @@ class RandomTargetRunner(object):
         self.cleanup(ego=True)
 #        self.final_summary()
         self.start()
-
+        return self.get_observation()
