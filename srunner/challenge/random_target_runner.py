@@ -288,7 +288,8 @@ class RandomTargetRunner(object):
         config.town = "Town01"
         self.world = self.client.get_world()
         settings = self.world.get_settings()
-        settings.synchronous_mode = False        
+        settings.synchronous_mode = False
+        self.world.apply_settings(settings)
         self.world = self.client.load_world(config.town)
 #        # Wait for the world to be ready
         self.world.wait_for_tick(self.wait_for_world)
@@ -350,9 +351,13 @@ class RandomTargetRunner(object):
             
 #           input_data = self.sensor_interface.get_data()
             location = CarlaDataProvider.get_location(self.ego_vehicle)
-            info = "location: {}".format(location)
+            velocity = CarlaDataProvider.get_velocity(self.ego_vehicle)
+            yaw = self.manager.ego_vehicle.get_transform().rotation.yaw
             if location is not None:
-                observation = [location.x, location.y, location.z]
+                observation = {"location": location,
+                               "goal": self.target.location,
+                               "yaw": yaw,
+                               "speed": velocity}
             else:
                 observation = None
             status = self.manager.scenario.test_criteria.status
