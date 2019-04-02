@@ -21,7 +21,6 @@ import carla
 
 from srunner.challenge.envs.sensor_interface import CallBack, Speedometer, HDMapReader, SensorInterface
 from srunner.scenarios.challenge_very_basic import ChallengeVeryBasic
-from srunner.scenariomanager.atomic_scenario_criteria import InRadiusRegionTest
 from srunner.scenariomanager.carla_data_provider import CarlaDataProvider
 from srunner.scenarios.config_parser import ScenarioConfiguration
 from srunner.scenariomanager.scenario_manager import ScenarioManager
@@ -321,10 +320,6 @@ class RandomTargetRunner(object):
                                           randomize=False,
                                           debug_mode=self.debug,
                                           config=config)
-#        except Exception as exception:
-#            print("The scenario cannot be loaded")
-#            print(exception)
-#            self.cleanup(ego=True)
 
             # Load scenario and run it
             self.manager.load_scenario(scenario)
@@ -335,22 +330,22 @@ class RandomTargetRunner(object):
         settings.synchronous_mode = False
         self.world.apply_settings(settings)
 
-    def get_observation(self):
+    def get_observation_dict(self):
 #       input_data = self.sensor_interface.get_data()
         location = CarlaDataProvider.get_location(self.ego_vehicle)
         velocity = CarlaDataProvider.get_velocity(self.ego_vehicle)
         yaw = self.manager.ego_vehicle.get_transform().rotation.yaw
         if location is not None:
-            observation = {"location": location,
-                           "goal": self.target.location,
-                            "yaw": yaw,
-                            "speed": velocity}
+            observation_dict = {"location": location,
+                                "goal": self.target.location,
+                                "yaw": yaw,
+                                "speed": velocity}
         else:
-            observation = None 
-        return observation
-
+            observation_dict = None 
+        return observation_dict
+        
     def step(self, action):
-        observation, reward, done, info = None, -0.01, False, None
+        observation_dict, done = {}, False
         if self.manager._running:
             control = carla.VehicleControl()
             control.steer = action[0]
@@ -363,17 +358,13 @@ class RandomTargetRunner(object):
             self.world.tick()
             self.world.wait_for_tick()
             
-            observation = self.get_observation()
+            observation_dict = self.get_observation_dict()
             status = self.manager.scenario.test_criteria.status
-            print(status)
-            if status == Status.SUCCESS:
-                reward = 1.
-                done = True
-            elif status == Status.FAILURE:
+            if status == [Status.SUCCESS, Status.FAILURE]:
                 done = True
         else:
             done = True
-        return observation, reward, done, info
+        return observation_dict, done
 
     def reset(self):
         # Provide outputs if required
@@ -384,4 +375,4 @@ class RandomTargetRunner(object):
         self.cleanup(ego=True)
 #        self.final_summary()
         self.start()
-        return self.get_observation()
+        return self.get_observation_dict()
