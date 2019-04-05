@@ -44,7 +44,7 @@ class RandomTargetRunner(object):
     actors = []
 
     # Tunable parameters
-    client_timeout = 15.0  # in seconds
+    client_timeout = 5.0  # in seconds
     wait_for_world = 10.0
 
     # CARLA world and scenario handlers
@@ -282,10 +282,11 @@ class RandomTargetRunner(object):
         """
         Run random target simulator
         """
-
+        print("starting")
         config = ScenarioConfiguration()
         config.town = "Town01"
         self.world = self.client.get_world()
+        print("!!!")
         settings = self.world.get_settings()
         settings.synchronous_mode = False
         self.world.apply_settings(settings)
@@ -313,13 +314,17 @@ class RandomTargetRunner(object):
             fin_x, fin_y, fin_z = self.target.location.x, self.target.location.y, self.target.location.z
             config.target = TargetConfiguration(fin_x, fin_y, fin_z,
                                                 carla.Transform(carla.Location(x=fin_x, y=fin_y, z=fin_z)))
+            distance = self.spawn_point.location.distance(self.target.location)
+            min_average_speed_towards_goal = 1.  # m/s
+            timeout = distance / min_average_speed_towards_goal
             scenario = ChallengeVeryBasic(self.world,
                                           self.ego_vehicle,
                                           self.actors,
                                           config.town,
                                           randomize=False,
                                           debug_mode=self.debug,
-                                          config=config)
+                                          config=config,
+                                          timeout=timeout)
 
             # Load scenario and run it
             self.manager.load_scenario(scenario)
@@ -341,18 +346,21 @@ class RandomTargetRunner(object):
                                 "yaw": yaw,
                                 "speed": velocity}
         else:
-            observation_dict = None 
+            observation_dict = None
+        print(observation_dict)
         return observation_dict
         
     def step(self, action):
-        observation_dict, done = {}, False
+        observation_dict, done = None, False
         if self.manager._running:
             control = carla.VehicleControl()
-            control.steer = action[0]
-            control.throttle = action[1]
-            control.brake = action[2]
+            control.steer = float(action[0])
+            control.throttle = float(0.5 + action[1] / 2.)
+            control.brake = float(0.) #float(action[2])
             control.hand_brake = False
             control.manual_gear_shift = False
+            print("step with action: {}".format([control.steer, control.throttle,
+                                                 control.brake]))
             self.manager.ego_vehicle.apply_control(control)
 
             self.world.tick()
@@ -360,19 +368,22 @@ class RandomTargetRunner(object):
             
             observation_dict = self.get_observation_dict()
             status = self.manager.scenario.test_criteria.status
-            if status == [Status.SUCCESS, Status.FAILURE]:
+            if status in [Status.SUCCESS, Status.FAILURE]:
                 done = True
         else:
             done = True
         return observation_dict, done
 
     def reset(self):
+        print("!!!reset env!!!")
         # Provide outputs if required
         self.analyze_scenario()
 
         # Stop scenario and cleanup
         self.manager.stop_scenario()
         self.cleanup(ego=True)
+        if self.manager is not None:
+            del self.manager
 #        self.final_summary()
         self.start()
         return self.get_observation_dict()

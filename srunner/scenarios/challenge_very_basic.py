@@ -13,6 +13,7 @@ import py_trees
 from srunner.scenariomanager.atomic_scenario_behavior import *
 from srunner.scenariomanager.atomic_scenario_criteria import *
 from srunner.scenarios.basic_scenario import *
+from srunner.scenariomanager.timer import TimeOut
 
 
 CHALLENGE_BASIC_SCENARIOS = ["ChallengeBasic"]
@@ -26,15 +27,15 @@ class ChallengeVeryBasic(BasicScenario):
 
     category = "ChallengeBasic"
     radius = 10.0           # meters
-    timeout = 300           # Timeout of scenario in seconds
 
-    def __init__(self, world, ego_vehicle, other_actors, town, randomize=False, debug_mode=False, config=None):
+    def __init__(self, world, ego_vehicle, other_actors, town, randomize=False, debug_mode=False, config=None, timeout=300):
         """
         Setup all relevant parameters and create scenario
         """
         self.config = config
         self.target = None
         self.route = None
+        self.timeout = timeout
 
         if hasattr(self.config, 'target'):
             self.target = self.config.target
@@ -71,11 +72,12 @@ class ChallengeVeryBasic(BasicScenario):
 
         parallel_criteria = py_trees.composites.Parallel("group_criteria",
                                                          policy=py_trees.common.ParallelPolicy.SUCCESS_ON_ONE)
-
+        timeout = TimeOut(self.timeout)
+        
         parallel_criteria.add_child(collision_criterion)
         parallel_criteria.add_child(target_criterion)
         parallel_criteria.add_child(wrong_way_criterion)
         parallel_criteria.add_child(red_light_criterion)
-
+        parallel_criteria.add_child(timeout)
 
         return parallel_criteria
